@@ -1,0 +1,31 @@
+preprocessing:
+  acc_smoothing_window: 10
+
+step_detection:
+  height: 12.0
+  distance_s: 0.35
+  prominence: 0.4
+  height_by_dataset:
+    Data3:
+      hand: 11.5
+
+heading:
+  gyro_axis: "z"
+  gyro_sign: -1.0
+  initial_heading_rad: 0.0
+  use_bias_correction: true
+  bias_static_duration_s: 2.0
+
+pdr:
+  step_length_m: 0.65
+  step_length_by_dataset:
+    Data3: 0.67
+
+visualization:
+  figure_dpi: 200
+  equal_axis: true
+  show_grid: true
+
+paths:
+  raw_data_dir: "data"
+  output_dir: "output"
