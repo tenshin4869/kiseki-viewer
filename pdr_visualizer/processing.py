@@ -216,6 +216,9 @@ def _estimate_heading_smart_pdr(
     corrected = (vertical_rate - bias) * gyro_sign * gyro_scale
 
     mag = _interpolate_vectors(t, mag_df, ("mag_x", "mag_y", "mag_z"))
+    mag_norm = np.linalg.norm(mag, axis=1)
+    mag_norm_reference = float(np.median(mag_norm))
+    mag_norm_deviation = np.abs(mag_norm - mag_norm_reference)
     pitch = np.arctan2(gravity[:, 1], np.sqrt(gravity[:, 0] ** 2 + gravity[:, 2] ** 2))
     roll = np.arctan2(-gravity[:, 0], gravity[:, 2])
     mag_gcs_x = mag[:, 0] * np.cos(roll) + mag[:, 2] * np.sin(roll)
@@ -230,6 +233,8 @@ def _estimate_heading_smart_pdr(
     heading_gyro = np.empty_like(corrected)
     heading = np.empty_like(corrected)
     accepted = np.zeros(len(t), dtype=bool)
+    mag_heading_error = np.zeros(len(t), dtype=float)
+    mag_correction_applied = np.zeros(len(t), dtype=float)
     heading_gyro[0] = initial_heading_rad
     heading[0] = initial_heading_rad
     for i in range(1, len(t)):
@@ -238,10 +243,12 @@ def _estimate_heading_smart_pdr(
         heading_gyro[i] = heading_gyro[i - 1] + 0.5 * (corrected[i - 1] + corrected[i]) * dt
         error = _angle_difference(mag_heading[i], predicted)
         mag_delta = _angle_difference(mag_heading[i], mag_heading[i - 1])
+        mag_heading_error[i] = error
         correlated = abs(error) <= h_cor_t_rad
         magnetically_stable = abs(mag_delta) <= h_mag_t_rad
         accepted[i] = correlated and magnetically_stable
-        heading[i] = predicted + (mag_correction_gain * error if accepted[i] else 0.0)
+        mag_correction_applied[i] = mag_correction_gain * error if accepted[i] else 0.0
+        heading[i] = predicted + mag_correction_applied[i]
 
     return pd.DataFrame(
         {
@@ -253,6 +260,10 @@ def _estimate_heading_smart_pdr(
             "heading_rad": heading,
             "heading_gyro_rad": heading_gyro,
             "heading_mag_rad": mag_heading,
+            "mag_norm_ut": mag_norm,
+            "mag_norm_deviation_ut": mag_norm_deviation,
+            "mag_heading_error_rad": mag_heading_error,
+            "mag_correction_applied_rad": mag_correction_applied,
             "mag_validation_accepted": accepted,
         }
     )

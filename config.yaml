@@ -30,8 +30,8 @@ heading:
   use_bias_correction: true
   bias_static_duration_s: 1.0
   initial_alignment:
-    # Trial routes begin with a straight segment along the plot's +y direction.
-    enabled: true
+    # Disabled for general entry behavior: visitors may turn immediately after entering.
+    enabled: false
     step_count: 6
     target_heading_deg: 0.0
 

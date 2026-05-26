@@ -16,7 +16,13 @@ from .io import (
     read_magnetometer_csv,
     resolve_trial_dir,
 )
-from .plotting import plot_acc_norm, plot_heading, plot_trajectory, plot_trajectory_comparison
+from .plotting import (
+    plot_acc_norm,
+    plot_heading,
+    plot_magnetic_diagnostics,
+    plot_trajectory,
+    plot_trajectory_comparison,
+)
 from .processing import (
     add_acc_norm,
     add_step_lengths,
@@ -99,20 +105,24 @@ def run_trial(trial_id: str, config: dict[str, Any]) -> dict[str, Path]:
         "steps": processed_dir / "steps.csv",
         "heading": processed_dir / "heading.csv",
         "trajectory": processed_dir / "trajectory.csv",
+        "simple_trajectory": processed_dir / "simple_trajectory.csv",
         "acc_norm_figure": figures_dir / "acc_norm.png",
         "heading_figure": figures_dir / "heading.png",
+        "magnetic_diagnostics_figure": figures_dir / "magnetic_diagnostics.png",
         "trajectory_figure": figures_dir / "trajectory.png",
         "trajectory_comparison_figure": figures_dir / "trajectory_comparison.png",
     }
     steps_df.to_csv(paths["steps"], index=False)
     heading_df.to_csv(paths["heading"], index=False)
     trajectory_df.to_csv(paths["trajectory"], index=False)
+    simple_trajectory_df.to_csv(paths["simple_trajectory"], index=False)
 
     dpi = int(config["visualization"]["figure_dpi"])
     show_grid = bool(config["visualization"]["show_grid"])
     equal_axis = bool(config["visualization"]["equal_axis"])
     plot_acc_norm(acc_df, steps_df, paths["acc_norm_figure"], dpi, show_grid)
     plot_heading(heading_df, str(config["heading"]["gyro_axis"]), paths["heading_figure"], dpi, show_grid)
+    plot_magnetic_diagnostics(heading_df, paths["magnetic_diagnostics_figure"], dpi, show_grid)
     plot_trajectory(trajectory_df, paths["trajectory_figure"], output_id, dpi, equal_axis, show_grid)
     plot_trajectory_comparison(
         trajectory_df,

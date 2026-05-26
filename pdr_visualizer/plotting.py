@@ -7,6 +7,7 @@ from pathlib import Path
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "pdr_visualizer_matplotlib"))
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -43,6 +44,47 @@ def plot_heading(heading_df: pd.DataFrame, gyro_axis: str, output_path: str | Pa
     _save(fig, output_path, dpi)
 
 
+def plot_magnetic_diagnostics(
+    heading_df: pd.DataFrame, output_path: str | Path, dpi: int, show_grid: bool
+) -> None:
+    if "mag_norm_ut" not in heading_df.columns:
+        return
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    axes[0].plot(heading_df["t"], heading_df["mag_norm_ut"], label="magnetic norm")
+    axes[0].axhline(
+        float(heading_df["mag_norm_ut"].median()),
+        color="tab:gray",
+        linestyle="--",
+        label="median",
+    )
+    axes[0].set_ylabel("Field [uT]")
+    axes[0].legend()
+    axes[1].plot(
+        heading_df["t"],
+        np.degrees(heading_df["mag_heading_error_rad"]),
+        label="magnetic innovation",
+    )
+    axes[1].plot(
+        heading_df["t"],
+        np.degrees(heading_df["mag_correction_applied_rad"]),
+        label="applied correction",
+    )
+    axes[1].set_ylabel("Angle [deg]")
+    axes[1].legend()
+    axes[2].plot(
+        heading_df["t"],
+        heading_df["mag_validation_accepted"].astype(int),
+        label="magnetic correction accepted",
+    )
+    axes[2].set_ylabel("Accepted")
+    axes[2].set_xlabel("Time [s]")
+    axes[2].set_ylim(-0.1, 1.1)
+    axes[2].legend()
+    for ax in axes:
+        ax.grid(show_grid)
+    _save(fig, output_path, dpi)
+
+
 def plot_trajectory(
     trajectory_df: pd.DataFrame,
     output_path: str | Path,
@@ -69,7 +111,7 @@ def plot_trajectory_comparison(
 ) -> None:
     fig, ax = plt.subplots(figsize=(7, 7))
     for label, trajectory_df, color in (
-        ("corrected (SmartPDR)", corrected_df, "tab:blue"),
+        ("magnetic/gyro fusion", corrected_df, "tab:blue"),
         ("simple (legacy)", simple_df, "tab:orange"),
     ):
         x = [0.0, *trajectory_df["x"].to_list()]

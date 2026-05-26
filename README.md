@@ -23,7 +23,7 @@ HPFで重力成分を取り除く
 
 ```text
 スタート地点: x=0, y=0
-初期進行方向: y軸正方向
+heading=0 rad の表示方向: y軸正方向
 右回転: x軸正方向へ曲がる
 左回転: x軸負方向へ曲がる
 heading=0 rad: +y方向
@@ -74,7 +74,7 @@ output/Data2/TurnLeft_001/figures/trajectory.png
 output/Data2/TurnLeft_001/figures/trajectory_comparison.png
 ```
 
-`trajectory_comparison.png` は、補正版の軌跡 (`corrected (SmartPDR)`) と、補正前の `acc_norm` + `gyro_z` 積分 + 固定歩幅によるシンプル版 (`simple (legacy)`) を同一座標上に表示します。シンプル版の再現設定は `comparison.simple` で変更できます。
+`trajectory_comparison.png` は、磁気・ジャイロ融合による軌跡 (`magnetic/gyro fusion`) と、`acc_norm` + `gyro_z` 積分 + 固定歩幅によるシンプル版 (`simple (legacy)`) を同一座標上に表示します。シンプル版の再現設定は `comparison.simple` で変更できます。
 
 ## 全試行を実行
 
@@ -112,14 +112,29 @@ heading:
   bias_static_duration_s: 1.0
   mag_correction_gain: 0.05
   initial_alignment:
-    enabled: true
+    enabled: false
     step_count: 6
     target_heading_deg: 0.0
 ```
 
 初期バイアス区間を `1.0s` としているのは、現在の記録で1秒前後から歩行が始まるためです。ジャイロのみで比較する場合は `use_smart_pdr: false` とし、必要に応じて `gyro_scale` を校正できます。
 
-現在の試行は最初にプロット上の `+y` 方向へ直進するため、最初の6歩の平均方位を `0 deg` に揃える初期アライメントを有効にしています。これは記事の絶対方位推定そのものではなく、既知の実験コースに対する表示座標系の校正です。補正前の方位は `heading_rad_unaligned`、適用した回転量は `heading_alignment_offset_rad` として `heading.csv` に残ります。
+店舗入口から自由に歩き始める利用を扱うため、最初の数歩を `+y` 方向へ揃える初期アライメントは既定では無効です。設定自体は過去の既知コース再現用に残していますが、一般的な比較には利用しません。
+
+磁気融合を使った試行では、`heading.csv` に `mag_norm_ut`、`mag_norm_deviation_ut`、`mag_heading_error_rad`、`mag_correction_applied_rad`、`mag_validation_accepted` を出力します。これにより、磁気方位が軌跡を引っ張った可能性を、磁場強度と補正採用状況から確認できます。
+
+初期直進補正を用いず、シンプル版と磁気・ジャイロ融合だけを `output_test` へ出力する比較は次のコマンドで実行します。
+
+```bash
+python3 scripts/run_magnetic_fusion_comparison.py --config config.yaml
+```
+
+```text
+output_test/magnetic_fusion/magnetic_fusion_report.md
+output_test/magnetic_fusion/metrics/straight_endpoint_error.png
+output_test/magnetic_fusion/metrics/loop_closure_error.png
+output_test/magnetic_fusion/metrics/magnetic_diagnostics.png
+```
 
 この方位推定は端末の前方向と歩行者の進行方向が概ね一致する手持ち条件を前提にします。ポケット条件は端末姿勢と身体方向の対応が異なるため、姿勢モード別の方位補正を追加するまで同じ精度は期待できません。
 
