@@ -111,9 +111,15 @@ heading:
   use_smart_pdr: true
   bias_static_duration_s: 1.0
   mag_correction_gain: 0.05
+  initial_alignment:
+    enabled: true
+    step_count: 6
+    target_heading_deg: 0.0
 ```
 
 初期バイアス区間を `1.0s` としているのは、現在の記録で1秒前後から歩行が始まるためです。ジャイロのみで比較する場合は `use_smart_pdr: false` とし、必要に応じて `gyro_scale` を校正できます。
+
+現在の試行は最初にプロット上の `+y` 方向へ直進するため、最初の6歩の平均方位を `0 deg` に揃える初期アライメントを有効にしています。これは記事の絶対方位推定そのものではなく、既知の実験コースに対する表示座標系の校正です。補正前の方位は `heading_rad_unaligned`、適用した回転量は `heading_alignment_offset_rad` として `heading.csv` に残ります。
 
 この方位推定は端末の前方向と歩行者の進行方向が概ね一致する手持ち条件を前提にします。ポケット条件は端末姿勢と身体方向の対応が異なるため、姿勢モード別の方位補正を追加するまで同じ精度は期待できません。
 

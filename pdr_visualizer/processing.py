@@ -361,6 +361,37 @@ def build_trajectory(steps_df: pd.DataFrame, heading_df: pd.DataFrame) -> pd.Dat
     )
 
 
+def align_heading_to_initial_steps(
+    steps_df: pd.DataFrame,
+    heading_df: pd.DataFrame,
+    step_count: int,
+    target_heading_rad: float = 0.0,
+) -> pd.DataFrame:
+    if step_count < 1:
+        raise ValueError("initial_alignment.step_count must be >= 1")
+    if steps_df.empty:
+        return heading_df.copy()
+
+    aligned = heading_df.copy()
+    heading_times = steps_df.get("heading_time", steps_df["step_time"]).to_numpy(dtype=float)
+    sample_times = heading_times[: min(step_count, len(heading_times))]
+    sampled_headings = np.interp(
+        sample_times,
+        aligned["t"].to_numpy(dtype=float),
+        aligned["heading_rad"].to_numpy(dtype=float),
+    )
+    offset = _angle_difference(
+        float(np.angle(np.mean(np.exp(1j * sampled_headings)))),
+        target_heading_rad,
+    )
+    for column in ("heading_rad", "heading_gyro_rad", "heading_mag_rad"):
+        if column in aligned.columns:
+            aligned[f"{column}_unaligned"] = aligned[column]
+            aligned[column] = aligned[column] - offset
+    aligned["heading_alignment_offset_rad"] = offset
+    return aligned
+
+
 def _project_acceleration_to_gravity(acc_df: pd.DataFrame, gravity_df: pd.DataFrame) -> np.ndarray:
     t = acc_df["t"].to_numpy(dtype=float)
     gravity = np.column_stack(

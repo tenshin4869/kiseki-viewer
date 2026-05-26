@@ -29,6 +29,11 @@ heading:
   initial_heading_rad: 0.0
   use_bias_correction: true
   bias_static_duration_s: 1.0
+  initial_alignment:
+    # Trial routes begin with a straight segment along the plot's +y direction.
+    enabled: true
+    step_count: 6
+    target_heading_deg: 0.0
 
 pdr:
   # Use fixed length while validating heading; dynamic remains available below.

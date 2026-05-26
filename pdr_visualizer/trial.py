@@ -17,7 +17,14 @@ from .io import (
     resolve_trial_dir,
 )
 from .plotting import plot_acc_norm, plot_heading, plot_trajectory, plot_trajectory_comparison
-from .processing import add_acc_norm, add_step_lengths, build_trajectory, detect_steps, estimate_heading
+from .processing import (
+    add_acc_norm,
+    add_step_lengths,
+    align_heading_to_initial_steps,
+    build_trajectory,
+    detect_steps,
+    estimate_heading,
+)
 
 
 def run_trial(trial_id: str, config: dict[str, Any]) -> dict[str, Path]:
@@ -71,6 +78,16 @@ def run_trial(trial_id: str, config: dict[str, Any]) -> dict[str, Path]:
         fixed_step_length_m=step_length_m,
         dynamic_config=config["pdr"].get("dynamic_step_length", {}),
     )
+    alignment_config = config["heading"].get("initial_alignment", {})
+    if bool(alignment_config.get("enabled", False)):
+        heading_df = align_heading_to_initial_steps(
+            steps_df,
+            heading_df,
+            step_count=int(alignment_config.get("step_count", 6)),
+            target_heading_rad=math.radians(
+                float(alignment_config.get("target_heading_deg", 0.0))
+            ),
+        )
     trajectory_df = build_trajectory(steps_df, heading_df)
     simple_trajectory_df = _build_simple_trajectory(acc_df, gyro_df, raw_dir, config)
 

@@ -34,6 +34,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "h_cor_t_deg": 5.0,
         "h_mag_t_deg": 2.0,
         "mag_correction_gain": 0.05,
+        "initial_alignment": {
+            "enabled": False,
+            "step_count": 6,
+            "target_heading_deg": 0.0,
+        },
     },
     "pdr": {
         "step_length_mode": "fixed",
