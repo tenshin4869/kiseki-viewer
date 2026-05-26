@@ -9,3 +9,4 @@ venv/
 
 # Generated PDR results.
 output/
+output_test/
