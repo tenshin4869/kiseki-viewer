@@ -61,6 +61,9 @@ def main() -> None:
     for method in METHODS:
         for condition in ("hand", "pocket"):
             print(f"{method} {condition}: {output_root / method / condition / 'trajectory_overlay.png'}")
+        data4 = output_root / method / "Data4" / "hand" / "trajectory_overlay.png"
+        if data4.exists():
+            print(f"{method} Data4 hand: {data4}")
 
 
 def _method_config(base_config: dict, output_dir: Path, magnetic_gain: float) -> dict:
@@ -94,6 +97,25 @@ def _write_overlays(
                 equal_axis=equal_axis,
                 show_grid=show_grid,
             )
+        datasets = sorted({trial_id.split("/", 1)[0] for trial_id in trajectories[method]})
+        for dataset in datasets:
+            for condition in ("hand", "pocket"):
+                selected = [
+                    (trial_id, trajectory)
+                    for trial_id, trajectory in trajectories[method].items()
+                    if trial_id.startswith(f"{dataset}/")
+                    and holding_position_from_trial(trial_id) == condition
+                ]
+                if not selected:
+                    continue
+                plot_overlay(
+                    selected,
+                    output_root / method / dataset / condition / "trajectory_overlay.png",
+                    title=f"{label}: {dataset} {condition} trials",
+                    dpi=dpi,
+                    equal_axis=equal_axis,
+                    show_grid=show_grid,
+                )
 
 
 def _write_readme(output_root: Path, trajectories: dict[str, dict[str, pd.DataFrame]]) -> None:
@@ -123,6 +145,11 @@ def _write_readme(output_root: Path, trajectories: dict[str, dict[str, pd.DataFr
 - `smartpdr_magnetic` と `smartpdr_no_magnetic` の差は、磁気による方位補正の有無だけである。
 - `simple_legacy` と SmartPDR風再現実装の差には、方位だけでなく歩行信号処理やステップ検出設定の差も含まれる。
 - すべての SmartPDR風出力で、最初の歩数を正面へ揃える初期アライメントは無効である。
+
+## データセット別の図
+
+各方式の直下に `<dataset>/<condition>/trajectory_overlay.png` も生成する。
+`Data4` は腕を振りながら端末を手に持った7試行であり、`Data4/hand/trajectory_overlay.png` にまとめている。
 """
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "README.md").write_text(text, encoding="utf-8")

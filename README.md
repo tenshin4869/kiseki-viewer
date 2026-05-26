@@ -163,6 +163,14 @@ output_test/trajectory_overlays/smartpdr_no_magnetic/hand/trajectory_overlay.png
 output_test/trajectory_overlays/smartpdr_no_magnetic/pocket/trajectory_overlay.png
 ```
 
+`Data4` のようにデータセット単位で確認する図も、各方式の `<dataset>/<condition>/trajectory_overlay.png` に出力されます。腕振り手持ち条件の `Data4` は次の3枚です。
+
+```text
+output_test/trajectory_overlays/simple_legacy/Data4/hand/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_magnetic/Data4/hand/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_no_magnetic/Data4/hand/trajectory_overlay.png
+```
+
 この方位推定は端末の前方向と歩行者の進行方向が概ね一致する手持ち条件を前提にします。ポケット条件は端末姿勢と身体方向の対応が異なるため、姿勢モード別の方位補正を追加するまで同じ精度は期待できません。
 
 原因切り分け中の既定設定では、歩幅を固定して方位の影響を見やすくしています。動的歩幅を試す場合は、記事の peak-to-valley と4乗根/対数モデルに切り替えられます。
