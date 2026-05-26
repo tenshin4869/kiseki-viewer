@@ -1,25 +1,71 @@
 preprocessing:
-  acc_smoothing_window: 10
+  acc_smoothing_window: 3
+  step_signal: "vertical_hpf"
+  hpf_alpha: 0.95
 
 step_detection:
-  height: 12.0
-  distance_s: 0.35
-  prominence: 0.4
+  # Article-style threshold detector is available, but loses steps in 001_walk.
+  use_custom_algorithm: false
+  window_n: 6
+  peak_threshold: 0.5
+  pp_threshold: 1.0
+  height: 1.2
+  distance_s: 0.48
+  prominence: 0.2
   height_by_dataset:
     Data3:
-      hand: 11.5
+      hand: 1.0
 
 heading:
+  use_smart_pdr: true
+  declination_deg: 7.5
+  h_cor_t_deg: 5.0
+  h_mag_t_deg: 2.0
+  mag_correction_gain: 0.05
   gyro_axis: "z"
   gyro_sign: -1.0
+  # For gyro-only comparison, 1.0637 calibrates Data2/LTurn_001 to one turn.
+  gyro_scale: 1.0
   initial_heading_rad: 0.0
   use_bias_correction: true
-  bias_static_duration_s: 2.0
+  bias_static_duration_s: 1.0
 
 pdr:
-  step_length_m: 0.65
+  # Use fixed length while validating heading; dynamic remains available below.
+  step_length_mode: "fixed"
+  step_length_m: 0.60
   step_length_by_dataset:
-    Data3: 0.67
+    Data3: 0.60
+  dynamic_step_length:
+    acc_scale_divisor: 1.0
+    acc_threshold: 3.23
+    fourth_root_gamma: 1.479
+    fourth_root_delta: -1.259
+    log_gamma: 1.131
+    log_delta: 0.159
+    calibrate_to_fixed_step_length: true
+    min_step_length_m: 0.25
+    max_step_length_m: 1.2
+
+comparison:
+  simple:
+    # Settings of the original acc-norm + gyro-z + fixed-stride pipeline.
+    acc_smoothing_window: 10
+    height: 12.0
+    height_by_dataset:
+      Data3:
+        hand: 11.5
+    distance_s: 0.35
+    prominence: 0.4
+    gyro_axis: "z"
+    gyro_sign: -1.0
+    gyro_scale: 1.0
+    initial_heading_rad: 0.0
+    use_bias_correction: true
+    bias_static_duration_s: 2.0
+    step_length_m: 0.65
+    step_length_by_dataset:
+      Data3: 0.67
 
 visualization:
   figure_dpi: 200

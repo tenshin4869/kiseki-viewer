@@ -11,7 +11,11 @@ except ModuleNotFoundError:
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "preprocessing": {"acc_smoothing_window": 10},
+    "preprocessing": {
+        "acc_smoothing_window": 10,
+        "step_signal": "acc_norm",
+        "hpf_alpha": 0.9,
+    },
     "step_detection": {
         "height": 12.0,
         "distance_s": 0.35,
@@ -21,13 +25,48 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "heading": {
         "gyro_axis": "z",
         "gyro_sign": -1.0,
+        "gyro_scale": 1.0,
         "initial_heading_rad": 0.0,
         "use_bias_correction": True,
-        "bias_static_duration_s": 2.0,
+        "bias_static_duration_s": 1.0,
+        "use_smart_pdr": False,
+        "declination_deg": 0.0,
+        "h_cor_t_deg": 5.0,
+        "h_mag_t_deg": 2.0,
+        "mag_correction_gain": 0.05,
     },
     "pdr": {
+        "step_length_mode": "fixed",
         "step_length_m": 0.65,
         "step_length_by_dataset": {},
+        "dynamic_step_length": {
+            "acc_scale_divisor": 1.0,
+            "acc_threshold": 3.23,
+            "fourth_root_gamma": 1.479,
+            "fourth_root_delta": -1.259,
+            "log_gamma": 1.131,
+            "log_delta": 0.159,
+            "calibrate_to_fixed_step_length": False,
+            "min_step_length_m": 0.25,
+            "max_step_length_m": 1.2,
+        },
+    },
+    "comparison": {
+        "simple": {
+            "acc_smoothing_window": 10,
+            "height": 12.0,
+            "height_by_dataset": {},
+            "distance_s": 0.35,
+            "prominence": 0.4,
+            "gyro_axis": "z",
+            "gyro_sign": -1.0,
+            "gyro_scale": 1.0,
+            "initial_heading_rad": 0.0,
+            "use_bias_correction": True,
+            "bias_static_duration_s": 2.0,
+            "step_length_m": 0.65,
+            "step_length_by_dataset": {},
+        },
     },
     "visualization": {"figure_dpi": 200, "equal_axis": True, "show_grid": True},
     "paths": {"raw_data_dir": "data", "output_dir": "output"},
