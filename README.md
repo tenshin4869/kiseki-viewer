@@ -136,6 +136,18 @@ output_test/magnetic_fusion/metrics/loop_closure_error.png
 output_test/magnetic_fusion/metrics/magnetic_diagnostics.png
 ```
 
+磁気の影響だけを切り分ける場合は、歩数・歩幅・重力軸ジャイロを同一に保ち、磁気補正ゲイン `0.05` と `0.0` を比較します。
+
+```bash
+python3 scripts/run_magnetic_ablation_comparison.py --config config.yaml
+```
+
+```text
+output_test/magnetic_ablation/magnetic_ablation_report.md
+output_test/magnetic_ablation/metrics/straight_endpoint_x.png
+output_test/magnetic_ablation/metrics/loop_closure_error.png
+```
+
 この方位推定は端末の前方向と歩行者の進行方向が概ね一致する手持ち条件を前提にします。ポケット条件は端末姿勢と身体方向の対応が異なるため、姿勢モード別の方位補正を追加するまで同じ精度は期待できません。
 
 原因切り分け中の既定設定では、歩幅を固定して方位の影響を見やすくしています。動的歩幅を試す場合は、記事の peak-to-valley と4乗根/対数モデルに切り替えられます。
