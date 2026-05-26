@@ -148,6 +148,21 @@ output_test/magnetic_ablation/metrics/straight_endpoint_x.png
 output_test/magnetic_ablation/metrics/loop_closure_error.png
 ```
 
+シンプル版、磁気あり再現実装、磁気なし再現実装について、手持ち条件とポケット条件の全軌跡を一つのフォルダへまとめる場合は次を実行します。
+
+```bash
+python3 scripts/export_three_method_overlays.py --config config.yaml
+```
+
+```text
+output_test/trajectory_overlays/simple_legacy/hand/trajectory_overlay.png
+output_test/trajectory_overlays/simple_legacy/pocket/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_magnetic/hand/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_magnetic/pocket/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_no_magnetic/hand/trajectory_overlay.png
+output_test/trajectory_overlays/smartpdr_no_magnetic/pocket/trajectory_overlay.png
+```
+
 この方位推定は端末の前方向と歩行者の進行方向が概ね一致する手持ち条件を前提にします。ポケット条件は端末姿勢と身体方向の対応が異なるため、姿勢モード別の方位補正を追加するまで同じ精度は期待できません。
 
 原因切り分け中の既定設定では、歩幅を固定して方位の影響を見やすくしています。動的歩幅を試す場合は、記事の peak-to-valley と4乗根/対数モデルに切り替えられます。
