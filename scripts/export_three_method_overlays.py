@@ -32,14 +32,24 @@ def main() -> None:
     )
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output-dir", default="output_test/trajectory_overlays")
+    parser.add_argument(
+        "--datasets",
+        nargs="*",
+        help="Only export selected datasets, for example: --datasets Data5 Data6",
+    )
     args = parser.parse_args()
 
     base_config = load_config(args.config)
     output_root = Path(args.output_dir)
     raw_root = Path(base_config["paths"]["raw_data_dir"])
-    trial_ids = [
-        str(trial_path.relative_to(raw_root)) for trial_path in find_trial_dirs(raw_root)
-    ]
+    trial_ids = [str(trial_path.relative_to(raw_root)) for trial_path in find_trial_dirs(raw_root)]
+    if args.datasets:
+        selected_datasets = set(args.datasets)
+        trial_ids = [
+            trial_id for trial_id in trial_ids if trial_id.split("/", 1)[0] in selected_datasets
+        ]
+    if not trial_ids:
+        raise ValueError("No trials found for the selected datasets.")
     trajectories: dict[str, dict[str, pd.DataFrame]] = {method: {} for method in METHODS}
 
     magnetic_config = _method_config(base_config, output_root / "smartpdr_magnetic", 0.05)
@@ -60,10 +70,14 @@ def main() -> None:
     print(f"output: {output_root}")
     for method in METHODS:
         for condition in ("hand", "pocket"):
-            print(f"{method} {condition}: {output_root / method / condition / 'trajectory_overlay.png'}")
-        data4 = output_root / method / "Data4" / "hand" / "trajectory_overlay.png"
-        if data4.exists():
-            print(f"{method} Data4 hand: {data4}")
+            path = output_root / method / condition / "trajectory_overlay.png"
+            if path.exists():
+                print(f"{method} {condition}: {path}")
+        for dataset in sorted({trial_id.split("/", 1)[0] for trial_id in trial_ids}):
+            for condition in ("hand", "pocket"):
+                path = output_root / method / dataset / condition / "trajectory_overlay.png"
+                if path.exists():
+                    print(f"{method} {dataset} {condition}: {path}")
 
 
 def _method_config(base_config: dict, output_dir: Path, magnetic_gain: float) -> dict:
@@ -83,21 +97,24 @@ def _write_overlays(
     equal_axis = bool(config["visualization"]["equal_axis"])
     show_grid = bool(config["visualization"]["show_grid"])
     for method, label in METHODS.items():
+        datasets = sorted({trial_id.split("/", 1)[0] for trial_id in trajectories[method]})
+        scope = " + ".join(datasets) if len(datasets) <= 2 else ""
         for condition in ("hand", "pocket"):
             selected = [
                 (trial_id, trajectory)
                 for trial_id, trajectory in trajectories[method].items()
                 if holding_position_from_trial(trial_id) == condition
             ]
+            if not selected:
+                continue
             plot_overlay(
                 selected,
                 output_root / method / condition / "trajectory_overlay.png",
-                title=f"{label}: {condition} trials",
+                title=f"{label}: {scope + ' ' if scope else ''}{condition} trials",
                 dpi=dpi,
                 equal_axis=equal_axis,
                 show_grid=show_grid,
             )
-        datasets = sorted({trial_id.split("/", 1)[0] for trial_id in trajectories[method]})
         for dataset in datasets:
             for condition in ("hand", "pocket"):
                 selected = [
@@ -127,6 +144,8 @@ def _write_readme(output_root: Path, trajectories: dict[str, dict[str, pd.DataFr
         holding_position_from_trial(trial_id) == "pocket"
         for trial_id in trajectories["simple_legacy"]
     )
+    datasets = sorted({trial_id.split("/", 1)[0] for trial_id in trajectories["simple_legacy"]})
+    dataset_text = ", ".join(f"`{dataset}`" for dataset in datasets)
     text = f"""# 3方式の全体軌跡比較
 
 ## 出力内容
@@ -137,8 +156,9 @@ def _write_readme(output_root: Path, trajectories: dict[str, dict[str, pd.DataFr
 | `smartpdr_magnetic` | SmartPDR風再現実装、磁気補正あり (`mag_correction_gain=0.05`) |
 | `smartpdr_no_magnetic` | SmartPDR風再現実装、磁気補正なし (`mag_correction_gain=0.0`) |
 
-各方式で `hand/trajectory_overlay.png` と `pocket/trajectory_overlay.png` を生成した。
+各方式で、対象データに存在する条件の `hand/trajectory_overlay.png` または `pocket/trajectory_overlay.png` を生成した。
 対象試行数は `hand={hand_count}`、`pocket={pocket_count}` である。
+対象データセットは {dataset_text} である。
 
 ## 比較上の注意
 
@@ -149,7 +169,6 @@ def _write_readme(output_root: Path, trajectories: dict[str, dict[str, pd.DataFr
 ## データセット別の図
 
 各方式の直下に `<dataset>/<condition>/trajectory_overlay.png` も生成する。
-`Data4` は腕を振りながら端末を手に持った7試行であり、`Data4/hand/trajectory_overlay.png` にまとめている。
 """
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "README.md").write_text(text, encoding="utf-8")
