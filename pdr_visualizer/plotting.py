@@ -265,8 +265,8 @@ def plot_table_region_classification_clean(
                 continue
             start = int(segment["start_row"])
             end = int(segment["end_row"])
-            draw_start = max(0, start - 1) if start > 0 else start
-            selected = trajectory.iloc[draw_start:end]
+            draw_end = min(end + 1, len(trajectory))
+            selected = trajectory.iloc[start:draw_end]
             if selected.empty:
                 continue
             color = colors.get(str(segment["destination_label"]), "tab:gray")
@@ -507,7 +507,10 @@ def _draw_seat_area_segment_paths(
         trajectory = trajectory_by_id.get(trial_id)
         if trajectory is None:
             continue
-        selected = trajectory.iloc[int(segment["start_row"]):int(segment["end_row"])]
+        start = int(segment["start_row"])
+        end = int(segment["end_row"])
+        draw_end = min(end + 1, len(trajectory))
+        selected = trajectory.iloc[start:draw_end]
         if selected.empty:
             continue
         color = colors.get(label, "tab:gray")
@@ -840,7 +843,8 @@ def _draw_segment_split_map(ax: plt.Axes, trajectory_df: pd.DataFrame, segments_
         for _, segment in segments_df.iterrows():
             start = int(segment["start_row"])
             end = int(segment["end_row"])
-            selected = trajectory_df.iloc[start:end]
+            draw_end = min(end + 1, len(trajectory_df))
+            selected = trajectory_df.iloc[start:draw_end]
             if selected.empty:
                 continue
             segment_id = int(segment["segment_id"])
@@ -942,7 +946,8 @@ def _draw_classified_segments(
             continue
         start = int(segment["start_row"])
         end = int(segment["end_row"])
-        selected = trajectory.iloc[start:end]
+        draw_end = min(end + 1, len(trajectory))
+        selected = trajectory.iloc[start:draw_end]
         if selected.empty:
             continue
         classification = str(segment["classification"])

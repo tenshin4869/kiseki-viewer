@@ -50,8 +50,9 @@ def add_step_metrics(trajectory_df: pd.DataFrame, config: dict[str, Any]) -> pd.
 
     window = int(config.get("speed_window_steps", 4))
     previous_speed = _previous_rolling_mean(speed, window)
+    future_speed = _future_rolling_mean(speed, window)
     speed_drop_ratio = np.maximum((previous_speed - speed) / np.maximum(previous_speed, 1e-9), 0.0)
-    signed_speed_change_ratio = (speed - previous_speed) / np.maximum(previous_speed, 1e-9)
+    signed_speed_change_ratio = (future_speed - previous_speed) / np.maximum(previous_speed, 1e-9)
     speed_change_ratio = np.abs(signed_speed_change_ratio)
 
     progress = np.linspace(1.0 / len(df), 1.0, len(df))
@@ -67,6 +68,7 @@ def add_step_metrics(trajectory_df: pd.DataFrame, config: dict[str, Any]) -> pd.
     df["dt_s"] = dt
     df["speed_mps"] = speed
     df["previous_speed_mps"] = previous_speed
+    df["future_speed_mps"] = future_speed
     df["signed_speed_change_ratio"] = signed_speed_change_ratio
     df["speed_change_ratio"] = speed_change_ratio
     df["speed_drop_ratio"] = speed_drop_ratio
@@ -564,6 +566,15 @@ def _previous_rolling_mean(values: np.ndarray, window: int) -> np.ndarray:
         start = max(0, i - window)
         previous = values[start:i]
         result[i] = float(np.mean(previous)) if len(previous) else float(values[i])
+    return result
+
+
+def _future_rolling_mean(values: np.ndarray, window: int) -> np.ndarray:
+    result = np.empty(len(values), dtype=float)
+    for i in range(len(values)):
+        end = min(len(values), i + max(window, 1))
+        future = values[i:end]
+        result[i] = float(np.mean(future)) if len(future) else float(values[i])
     return result
 
 

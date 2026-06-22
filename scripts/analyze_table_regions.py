@@ -11,13 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pdr_visualizer.config import load_config
 from pdr_visualizer.io import find_trial_dirs, output_trial_id
 from pdr_visualizer.plotting import (
-    plot_all_trajectories_segmentation_plane,
-    plot_segmentation_overview,
     plot_table_region_alpha_shapes,
     plot_table_region_ellipses,
     plot_table_region_classification_clean,
     plot_table_regions,
-    plot_trial_segmentation_diagnostic,
 )
 from pdr_visualizer.table_region import (
     add_step_metrics,
@@ -43,13 +40,13 @@ def main() -> None:
     parser.add_argument(
         "--no-run-missing",
         action="store_true",
-        help="不足しているtrajectory.csvを分析前に生成しない。",
+        help="Do not run missing trials before analysis.",
     )
     parser.add_argument(
         "--speed-drop-ratio",
         type=float,
         default=None,
-        help="席周辺判定に使う速度低下率しきい値を上書きする。",
+        help="Override the speed drop ratio used for seat-area classification.",
     )
     args = parser.parse_args()
 
@@ -85,7 +82,7 @@ def main() -> None:
         if run_missing and not trajectory_path.exists():
             run_trial(trial_id, config)
         if not trajectory_path.exists():
-            print(f"軌跡CSVがないためスキップ: {trajectory_path}")
+            print(f"Skipping missing trajectory CSV: {trajectory_path}")
             continue
         trajectory_df = pd.read_csv(trajectory_path)
         speed_features = add_step_metrics(trajectory_df, segmentation_config)
@@ -132,16 +129,23 @@ def main() -> None:
     table_points_from_segment_representatives = summarize_cluster_representatives(
         clustered_seat_area_segment_representatives
     )
+    alpha_shape_source_segments = _alpha_shape_source_segments(
+        segments,
+        clustered_seat_area_segment_representatives,
+    )
     table_region_ellipses = summarize_cluster_ellipses(
         clustered_seat_area_segment_representatives,
         n_std=2.0,
     )
-    alpha_shape_value = 0.9
-    table_region_alpha_shapes = summarize_cluster_alpha_shapes(
-        clustered_seat_area_segment_representatives,
-        alpha=alpha_shape_value,
-        min_points=4,
-    )
+    alpha_shape_values = [0.9, 1.5]
+    table_region_alpha_shapes_by_alpha = {
+        alpha: summarize_cluster_alpha_shapes(
+            clustered_seat_area_segment_representatives,
+            alpha=alpha,
+            min_points=4,
+        )
+        for alpha in alpha_shape_values
+    }
 
     segments_path = table_output_dir / "segments.csv"
     segment_summary_path = table_output_dir / "segment_summary.csv"
@@ -159,16 +163,21 @@ def main() -> None:
     table_points_from_segment_representatives_path = (
         table_output_dir / "table_region_points_from_segment_representatives.csv"
     )
+    alpha_shape_source_segments_path = table_output_dir / "table_region_alpha_shape_source_segments.csv"
     table_region_ellipses_path = table_output_dir / "table_region_ellipses_from_segment_centers.csv"
     table_region_alpha_shapes_path = table_output_dir / "table_region_alpha_shapes_from_segment_centers.csv"
+    table_region_alpha_shape_paths = {
+        0.9: table_region_alpha_shapes_path,
+        1.5: table_output_dir / "table_region_alpha_shapes_from_segment_centers_alpha1p5.csv",
+    }
     figure_path = table_output_dir / "table_region_cluster_points.png"
     segment_representative_figure_path = table_output_dir / "table_region_segment_representatives.png"
     ellipse_figure_path = table_output_dir / "table_region_ellipses_from_segment_centers.png"
     alpha_shape_figure_path = table_output_dir / "table_region_alpha_shapes_from_segment_centers.png"
-    segmentation_overview_path = table_output_dir / "segmentation_overview.png"
-    all_segmentation_plane_path = table_output_dir / "all_trajectories_segmentation_plane.png"
-    trial_diagnostic_dir = table_output_dir / "segmentation_diagnostics"
-
+    alpha_shape_figure_paths = {
+        0.9: alpha_shape_figure_path,
+        1.5: table_output_dir / "table_region_alpha_shapes_from_segment_centers_alpha1p5.png",
+    }
     segments.to_csv(segments_path, index=False)
     segment_summary.to_csv(segment_summary_path, index=False)
     speed_features.to_csv(speed_features_path, index=False)
@@ -185,8 +194,10 @@ def main() -> None:
     table_points_from_segment_representatives.to_csv(
         table_points_from_segment_representatives_path, index=False
     )
+    alpha_shape_source_segments.to_csv(alpha_shape_source_segments_path, index=False)
     table_region_ellipses.to_csv(table_region_ellipses_path, index=False)
-    table_region_alpha_shapes.to_csv(table_region_alpha_shapes_path, index=False)
+    for alpha, alpha_shapes in table_region_alpha_shapes_by_alpha.items():
+        alpha_shapes.to_csv(table_region_alpha_shape_paths[alpha], index=False)
     plot_table_regions(
         trajectories,
         segments,
@@ -194,7 +205,7 @@ def main() -> None:
         table_points,
         table_config.get("table_overlays", {}),
         figure_path,
-        "Data001/Data002 席周辺クラスタ代表点",
+        "Data001/Data002 table-region cluster points",
         dpi=int(config["visualization"]["figure_dpi"]),
         equal_axis=bool(config["visualization"]["equal_axis"]),
         show_grid=bool(config["visualization"]["show_grid"]),
@@ -205,7 +216,7 @@ def main() -> None:
         table_points_from_segment_representatives,
         table_config.get("table_overlays", {}),
         segment_representative_figure_path,
-        "Data001/Data002 セグメント長抑制による分類",
+        "Data001/Data002 segment classification with representatives",
         dpi=int(config["visualization"]["figure_dpi"]),
         equal_axis=bool(config["visualization"]["equal_axis"]),
         show_grid=bool(config["visualization"]["show_grid"]),
@@ -217,82 +228,45 @@ def main() -> None:
         table_region_ellipses,
         table_config.get("table_overlays", {}),
         ellipse_figure_path,
-        "Data001/Data002 セグメント中心点クラスタの楕円領域",
+        "Data001/Data002 ellipse regions from segment-center clusters",
         dpi=int(config["visualization"]["figure_dpi"]),
         equal_axis=bool(config["visualization"]["equal_axis"]),
         show_grid=bool(config["visualization"]["show_grid"]),
     )
-    plot_table_region_alpha_shapes(
-        clustered_seat_area_segment_representatives,
-        alpha=alpha_shape_value,
-        min_points=4,
-        table_overlays=table_config.get("table_overlays", {}),
-        output_path=alpha_shape_figure_path,
-        title="Data001/Data002 セグメント中心点クラスタのα-shape領域",
-        dpi=int(config["visualization"]["figure_dpi"]),
-        equal_axis=bool(config["visualization"]["equal_axis"]),
-        show_grid=bool(config["visualization"]["show_grid"]),
-    )
-    plot_segmentation_overview(
-        trajectories,
-        segments,
-        speed_features,
-        table_config.get("table_overlays", {}),
-        segmentation_overview_path,
-        "Data001/Data002 セグメント分割の全体図",
-        dpi=int(config["visualization"]["figure_dpi"]),
-        equal_axis=bool(config["visualization"]["equal_axis"]),
-        show_grid=bool(config["visualization"]["show_grid"]),
-    )
-    plot_all_trajectories_segmentation_plane(
-        trajectories,
-        segments,
-        speed_features,
-        table_points,
-        table_config.get("table_overlays", {}),
-        all_segmentation_plane_path,
-        "Data001/Data002 全軌跡のセグメント分割",
-        dpi=int(config["visualization"]["figure_dpi"]),
-        equal_axis=bool(config["visualization"]["equal_axis"]),
-        show_grid=bool(config["visualization"]["show_grid"]),
-    )
-    trial_diagnostic_dir.mkdir(parents=True, exist_ok=True)
-    for trial_id, _, trajectory_df in trajectories:
-        safe_name = trial_id.replace("/", "_")
-        plot_trial_segmentation_diagnostic(
-            trial_id,
-            trajectory_df,
-            segments[segments["trial_id"] == trial_id],
-            speed_features[speed_features["trial_id"] == trial_id],
-            table_config.get("table_overlays", {}),
-            trial_diagnostic_dir / f"{safe_name}.png",
+    for alpha in alpha_shape_values:
+        plot_table_region_alpha_shapes(
+            clustered_seat_area_segment_representatives,
+            alpha=alpha,
+            min_points=4,
+            table_overlays=table_config.get("table_overlays", {}),
+            output_path=alpha_shape_figure_paths[alpha],
+            title=f"Data001/Data002 alpha-shape regions from segment-center clusters alpha={alpha}",
             dpi=int(config["visualization"]["figure_dpi"]),
             equal_axis=bool(config["visualization"]["equal_axis"]),
             show_grid=bool(config["visualization"]["show_grid"]),
         )
-
-    print(f"対象軌跡数: {len(trajectories)}")
-    print(f"セグメント一覧: {segments_path}")
-    print(f"軌跡別セグメント数: {segment_summary_path}")
-    print(f"速度特徴量: {speed_features_path}")
-    print(f"速度特徴量サマリ: {speed_summary_path}")
-    print(f"席周辺セグメント点: {seat_area_points_path}")
-    print(f"席周辺セグメント代表点: {seat_area_segment_representatives_path}")
-    print(f"セグメント代表点: {points_path}")
-    print(f"クラスタ済み代表点: {clustered_representative_points_path}")
-    print(f"クラスタ済み席周辺点: {clustered_seat_area_points_path}")
-    print(f"クラスタ済み席周辺セグメント代表点: {clustered_seat_area_segment_representatives_path}")
-    print(f"推定テーブル代表点: {table_points_path}")
-    print(f"セグメント代表点からの推定テーブル代表点: {table_points_from_segment_representatives_path}")
-    print(f"セグメント中心点クラスタ楕円: {table_region_ellipses_path}")
-    print(f"セグメント中心点クラスタα-shape: {table_region_alpha_shapes_path}")
-    print(f"代表点図: {figure_path}")
-    print(f"セグメント代表点図: {segment_representative_figure_path}")
-    print(f"楕円領域図: {ellipse_figure_path}")
-    print(f"α-shape領域図: {alpha_shape_figure_path}")
-    print(f"セグメント全体図: {segmentation_overview_path}")
-    print(f"全軌跡1平面セグメント図: {all_segmentation_plane_path}")
-    print(f"軌跡別診断図: {trial_diagnostic_dir}")
+    print(f"Target trajectories: {len(trajectories)}")
+    print(f"Segments: {segments_path}")
+    print(f"Segment summary: {segment_summary_path}")
+    print(f"Speed features: {speed_features_path}")
+    print(f"Speed feature summary: {speed_summary_path}")
+    print(f"Seat-area segment points: {seat_area_points_path}")
+    print(f"Seat-area segment representatives: {seat_area_segment_representatives_path}")
+    print(f"Representative points: {points_path}")
+    print(f"Clustered representative points: {clustered_representative_points_path}")
+    print(f"Clustered seat-area points: {clustered_seat_area_points_path}")
+    print(f"Clustered seat-area segment representatives: {clustered_seat_area_segment_representatives_path}")
+    print(f"Estimated table points: {table_points_path}")
+    print(f"Estimated table points from segment representatives: {table_points_from_segment_representatives_path}")
+    print(f"Alpha-shape source segments: {alpha_shape_source_segments_path}")
+    print(f"Ellipse regions from segment centers: {table_region_ellipses_path}")
+    for alpha in alpha_shape_values:
+        print(f"Alpha-shape regions from segment centers alpha={alpha}: {table_region_alpha_shape_paths[alpha]}")
+    print(f"Representative point figure: {figure_path}")
+    print(f"Segment representative figure: {segment_representative_figure_path}")
+    print(f"Ellipse region figure: {ellipse_figure_path}")
+    for alpha in alpha_shape_values:
+        print(f"Alpha-shape region figure alpha={alpha}: {alpha_shape_figure_paths[alpha]}")
 
 
 def _summarize_segments_by_trial(segments: pd.DataFrame) -> pd.DataFrame:
@@ -409,6 +383,63 @@ def _seat_area_segment_representatives(segments: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows, columns=columns)
+
+
+def _alpha_shape_source_segments(
+    segments: pd.DataFrame,
+    clustered_segment_representatives: pd.DataFrame,
+) -> pd.DataFrame:
+    if segments.empty or clustered_segment_representatives.empty:
+        return pd.DataFrame()
+
+    selected_frames = []
+    for _, group in clustered_segment_representatives.groupby("destination_label", sort=True):
+        non_noise = group[group["cluster_id"] != "noise"]
+        if not non_noise.empty:
+            cluster_id = non_noise.groupby("cluster_id").size().sort_values(ascending=False).index[0]
+            selected = non_noise[non_noise["cluster_id"] == cluster_id]
+        else:
+            selected = group
+        selected_frames.append(selected)
+
+    selected_points = pd.concat(selected_frames, ignore_index=True)
+    selected_points = selected_points[
+        ["trial_id", "destination_label", "segment_id", "cluster_id", "x", "y"]
+    ].rename(columns={"x": "alpha_shape_source_x", "y": "alpha_shape_source_y"})
+
+    merged = selected_points.merge(
+        segments,
+        on=["trial_id", "destination_label", "segment_id"],
+        how="left",
+    )
+    preferred_columns = [
+        "trial_id",
+        "destination_label",
+        "segment_id",
+        "cluster_id",
+        "classification",
+        "alpha_shape_source_x",
+        "alpha_shape_source_y",
+        "segment_center_x",
+        "segment_center_y",
+        "representative_x",
+        "representative_y",
+        "start_step_index",
+        "end_step_index",
+        "step_count",
+        "path_length_m",
+        "mean_speed_mps",
+        "slowdown_ratio",
+        "low_speed_ratio",
+        "heading_change_deg",
+        "has_speed_table_evidence",
+        "is_near_speed_table_segment",
+    ]
+    columns = [column for column in preferred_columns if column in merged.columns]
+    remaining = [column for column in merged.columns if column not in columns]
+    return merged[columns + remaining].sort_values(
+        ["destination_label", "trial_id", "segment_id"]
+    )
 
 
 def _summarize_speed_features(speed_features: pd.DataFrame) -> pd.DataFrame:
