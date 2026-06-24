@@ -163,6 +163,70 @@ def plot_overlay(
     _save(fig, output_path, dpi)
 
 
+def plot_table_trajectory_overview(
+    trajectories: list[tuple[str, str, pd.DataFrame]],
+    table_points_df: pd.DataFrame,
+    table_overlays: dict[str, dict[str, Any]] | None,
+    output_path: str | Path,
+    title: str,
+    dpi: int,
+    equal_axis: bool,
+    show_grid: bool,
+) -> None:
+    fig, ax = plt.subplots(figsize=(11, 9))
+    colors = {"A": "tab:blue", "C": "tab:orange"}
+    _draw_table_overlays(ax, table_overlays or {}, colors)
+    labeled: set[str] = set()
+    for trial_id, label, trajectory in trajectories:
+        if trajectory.empty:
+            continue
+        color = colors.get(label, "tab:gray")
+        legend_label = f"Table {label} trajectories" if label not in labeled else None
+        labeled.add(label)
+        ax.plot(
+            [0.0, *trajectory["x"].to_list()],
+            [0.0, *trajectory["y"].to_list()],
+            color=color,
+            alpha=0.46,
+            linewidth=1.6,
+            marker="o",
+            markersize=2.8,
+            label=legend_label,
+            zorder=5,
+        )
+        ax.scatter(
+            [float(trajectory["x"].iloc[-1])],
+            [float(trajectory["y"].iloc[-1])],
+            marker="x",
+            s=54,
+            color=color,
+            linewidth=1.3,
+            zorder=12,
+        )
+
+    if not table_points_df.empty:
+        for _, row in table_points_df.iterrows():
+            label = str(row["destination_label"])
+            color = colors.get(label, "tab:gray")
+            ax.scatter(
+                [float(row["centroid_x"])],
+                [float(row["centroid_y"])],
+                marker="*",
+                s=280,
+                color=color,
+                edgecolor="black",
+                linewidth=1.0,
+                label=f"Estimated table {label}",
+                zorder=25,
+            )
+
+    ax.scatter([0.0], [0.0], marker="s", s=70, color="tab:green", label="Entrance", zorder=26)
+    ax.set_title(title)
+    _style_trajectory_axis(ax, equal_axis, show_grid)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize="small")
+    _save(fig, output_path, dpi)
+
+
 def plot_table_regions(
     trajectories: list[tuple[str, str, pd.DataFrame]],
     segments_df: pd.DataFrame,
@@ -265,8 +329,8 @@ def plot_table_region_classification_clean(
                 continue
             start = int(segment["start_row"])
             end = int(segment["end_row"])
-            draw_start = max(0, start - 1) if start > 0 else start
-            selected = trajectory.iloc[draw_start:end]
+            draw_end = min(end + 1, len(trajectory))
+            selected = trajectory.iloc[start:draw_end]
             if selected.empty:
                 continue
             color = colors.get(str(segment["destination_label"]), "tab:gray")
@@ -507,7 +571,10 @@ def _draw_seat_area_segment_paths(
         trajectory = trajectory_by_id.get(trial_id)
         if trajectory is None:
             continue
-        selected = trajectory.iloc[int(segment["start_row"]):int(segment["end_row"])]
+        start = int(segment["start_row"])
+        end = int(segment["end_row"])
+        draw_end = min(end + 1, len(trajectory))
+        selected = trajectory.iloc[start:draw_end]
         if selected.empty:
             continue
         color = colors.get(label, "tab:gray")
@@ -840,7 +907,8 @@ def _draw_segment_split_map(ax: plt.Axes, trajectory_df: pd.DataFrame, segments_
         for _, segment in segments_df.iterrows():
             start = int(segment["start_row"])
             end = int(segment["end_row"])
-            selected = trajectory_df.iloc[start:end]
+            draw_end = min(end + 1, len(trajectory_df))
+            selected = trajectory_df.iloc[start:draw_end]
             if selected.empty:
                 continue
             segment_id = int(segment["segment_id"])
@@ -942,7 +1010,8 @@ def _draw_classified_segments(
             continue
         start = int(segment["start_row"])
         end = int(segment["end_row"])
-        selected = trajectory.iloc[start:end]
+        draw_end = min(end + 1, len(trajectory))
+        selected = trajectory.iloc[start:draw_end]
         if selected.empty:
             continue
         classification = str(segment["classification"])

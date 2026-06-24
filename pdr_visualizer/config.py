@@ -107,6 +107,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "dbscan_eps_m": 1.2,
             "dbscan_min_samples": 2,
         },
+        "trajectory_correction": {
+            "enabled": True,
+            "target_radius_m": 0.45,
+            "progress_power": 1.0,
+        },
         "table_overlays": {
             "A": {
                 "left": -3.3,
