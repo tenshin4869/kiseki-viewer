@@ -356,6 +356,90 @@ def summarize_cluster_alpha_shapes(
     return pd.DataFrame(rows, columns=columns)
 
 
+def correct_trajectories_to_table_targets(
+    trajectories: list[tuple[str, str, pd.DataFrame]],
+    table_points: pd.DataFrame,
+    config: dict[str, Any],
+) -> tuple[list[tuple[str, str, pd.DataFrame]], pd.DataFrame]:
+    target_radius_m = float(config.get("target_radius_m", 0.45))
+    progress_power = float(config.get("progress_power", 1.0))
+    targets = _table_point_targets(table_points)
+    corrected_trajectories: list[tuple[str, str, pd.DataFrame]] = []
+    summary_rows: list[dict[str, Any]] = []
+
+    for trial_id, label, trajectory in trajectories:
+        if trajectory.empty or label not in targets:
+            corrected_trajectories.append((trial_id, label, trajectory.copy()))
+            continue
+
+        target = targets[label]
+        endpoint = trajectory[["x", "y"]].iloc[-1].to_numpy(dtype=float)
+        offset_from_target = endpoint - target
+        endpoint_distance = float(np.linalg.norm(offset_from_target))
+        if endpoint_distance > target_radius_m and endpoint_distance > 1e-9:
+            corrected_endpoint = target + offset_from_target / endpoint_distance * target_radius_m
+        else:
+            corrected_endpoint = endpoint.copy()
+
+        correction = corrected_endpoint - endpoint
+        corrected = trajectory.copy()
+        progress = _trajectory_progress(len(corrected), progress_power)
+        corrected["x"] = corrected["x"].to_numpy(dtype=float) + progress * correction[0]
+        corrected["y"] = corrected["y"].to_numpy(dtype=float) + progress * correction[1]
+        corrected["correction_dx_m"] = progress * correction[0]
+        corrected["correction_dy_m"] = progress * correction[1]
+        corrected["correction_progress"] = progress
+        corrected_trajectories.append((trial_id, label, corrected))
+
+        corrected_endpoint_distance = float(np.linalg.norm(corrected_endpoint - target))
+        summary_rows.append(
+            {
+                "trial_id": trial_id,
+                "destination_label": label,
+                "target_x": float(target[0]),
+                "target_y": float(target[1]),
+                "target_radius_m": target_radius_m,
+                "original_endpoint_x": float(endpoint[0]),
+                "original_endpoint_y": float(endpoint[1]),
+                "corrected_endpoint_x": float(corrected_endpoint[0]),
+                "corrected_endpoint_y": float(corrected_endpoint[1]),
+                "endpoint_distance_to_target_before_m": endpoint_distance,
+                "endpoint_distance_to_target_after_m": corrected_endpoint_distance,
+                "endpoint_correction_dx_m": float(correction[0]),
+                "endpoint_correction_dy_m": float(correction[1]),
+                "endpoint_correction_distance_m": float(np.linalg.norm(correction)),
+                "progress_power": progress_power,
+            }
+        )
+
+    return corrected_trajectories, pd.DataFrame(summary_rows)
+
+
+def recompute_segment_centers_from_trajectories(
+    segments: pd.DataFrame,
+    trajectories: list[tuple[str, str, pd.DataFrame]],
+) -> pd.DataFrame:
+    if segments.empty:
+        return segments.copy()
+
+    corrected = segments.copy()
+    trajectory_by_trial = {trial_id: trajectory for trial_id, _, trajectory in trajectories}
+    for index, segment in corrected.iterrows():
+        trajectory = trajectory_by_trial.get(str(segment["trial_id"]))
+        if trajectory is None or trajectory.empty:
+            continue
+        start = int(segment["start_row"])
+        end = int(segment["end_row"])
+        selected = trajectory.iloc[start:end]
+        if selected.empty:
+            continue
+        corrected.at[index, "segment_center_x"] = float(selected["x"].mean())
+        corrected.at[index, "segment_center_y"] = float(selected["y"].mean())
+        corrected.at[index, "representative_x"] = float(selected["x"].mean())
+        corrected.at[index, "representative_y"] = float(selected["y"].mean())
+    return corrected
+
+
 def classify_table_area_segments(segments: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
     return _classify_segments(segments, config)
 
@@ -576,6 +660,25 @@ def _future_rolling_mean(values: np.ndarray, window: int) -> np.ndarray:
         future = values[i:end]
         result[i] = float(np.mean(future)) if len(future) else float(values[i])
     return result
+
+
+def _table_point_targets(table_points: pd.DataFrame) -> dict[str, np.ndarray]:
+    targets: dict[str, np.ndarray] = {}
+    if table_points.empty:
+        return targets
+    for _, row in table_points.iterrows():
+        targets[str(row["destination_label"])] = np.array(
+            [float(row["centroid_x"]), float(row["centroid_y"])],
+            dtype=float,
+        )
+    return targets
+
+
+def _trajectory_progress(length: int, power: float) -> np.ndarray:
+    if length <= 1:
+        return np.ones(max(length, 0), dtype=float)
+    base = np.linspace(0.0, 1.0, length)
+    return np.power(base, max(power, 1e-9))
 
 
 def _slowdown_followed_by_turn(

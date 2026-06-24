@@ -14,14 +14,17 @@ from pdr_visualizer.plotting import (
     plot_table_region_alpha_shapes,
     plot_table_region_ellipses,
     plot_table_region_classification_clean,
+    plot_table_trajectory_overview,
     plot_table_regions,
 )
 from pdr_visualizer.table_region import (
     add_step_metrics,
     classify_table_area_segments,
     cluster_representative_points,
+    correct_trajectories_to_table_targets,
     destination_label_from_trial_id,
     is_target_trial,
+    recompute_segment_centers_from_trajectories,
     segment_trajectory,
     select_table_area_points_for_segment,
     summarize_cluster_alpha_shapes,
@@ -146,6 +149,37 @@ def main() -> None:
         )
         for alpha in alpha_shape_values
     }
+    correction_config = dict(table_config.get("trajectory_correction", {}))
+    corrected_trajectories, trajectory_correction_summary = correct_trajectories_to_table_targets(
+        trajectories,
+        table_points_from_segment_representatives,
+        correction_config,
+    )
+    corrected_segments = recompute_segment_centers_from_trajectories(
+        segments,
+        corrected_trajectories,
+    )
+    corrected_seat_area_segment_representatives = _seat_area_segment_representatives(corrected_segments)
+    clustered_corrected_seat_area_segment_representatives = cluster_representative_points(
+        corrected_seat_area_segment_representatives,
+        eps_m=float(table_config["clustering"]["dbscan_eps_m"]),
+        min_samples=int(table_config["clustering"]["dbscan_min_samples"]),
+    )
+    corrected_table_points_from_segment_representatives = summarize_cluster_representatives(
+        clustered_corrected_seat_area_segment_representatives
+    )
+    corrected_table_region_alpha_shapes_by_alpha = {
+        alpha: summarize_cluster_alpha_shapes(
+            clustered_corrected_seat_area_segment_representatives,
+            alpha=alpha,
+            min_points=4,
+        )
+        for alpha in alpha_shape_values
+    }
+    alpha_shape_area_comparison = _alpha_shape_area_comparison(
+        table_region_alpha_shapes_by_alpha,
+        corrected_table_region_alpha_shapes_by_alpha,
+    )
 
     segments_path = table_output_dir / "segments.csv"
     segment_summary_path = table_output_dir / "segment_summary.csv"
@@ -178,6 +212,29 @@ def main() -> None:
         0.9: alpha_shape_figure_path,
         1.5: table_output_dir / "table_region_alpha_shapes_from_segment_centers_alpha1p5.png",
     }
+    correction_requirements_path = table_output_dir / "trajectory_correction_requirements.md"
+    correction_result_path = table_output_dir / "trajectory_correction_implementation_result.md"
+    trajectory_correction_summary_path = table_output_dir / "trajectory_correction_summary.csv"
+    corrected_seat_area_segment_representatives_path = (
+        table_output_dir / "corrected_seat_area_segment_representatives.csv"
+    )
+    clustered_corrected_seat_area_segment_representatives_path = (
+        table_output_dir / "clustered_corrected_seat_area_segment_representatives.csv"
+    )
+    corrected_table_points_from_segment_representatives_path = (
+        table_output_dir / "corrected_table_region_points_from_segment_representatives.csv"
+    )
+    alpha_shape_area_comparison_path = table_output_dir / "table_region_alpha_shape_area_comparison.csv"
+    corrected_table_region_alpha_shape_paths = {
+        0.9: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers.csv",
+        1.5: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers_alpha1p5.csv",
+    }
+    uncorrected_trajectory_overview_path = table_output_dir / "trajectories_uncorrected_overview.png"
+    corrected_trajectory_overview_path = table_output_dir / "trajectories_corrected_overview.png"
+    corrected_alpha_shape_figure_paths = {
+        0.9: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers.png",
+        1.5: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers_alpha1p5.png",
+    }
     segments.to_csv(segments_path, index=False)
     segment_summary.to_csv(segment_summary_path, index=False)
     speed_features.to_csv(speed_features_path, index=False)
@@ -198,6 +255,26 @@ def main() -> None:
     table_region_ellipses.to_csv(table_region_ellipses_path, index=False)
     for alpha, alpha_shapes in table_region_alpha_shapes_by_alpha.items():
         alpha_shapes.to_csv(table_region_alpha_shape_paths[alpha], index=False)
+    trajectory_correction_summary.to_csv(trajectory_correction_summary_path, index=False)
+    corrected_seat_area_segment_representatives.to_csv(
+        corrected_seat_area_segment_representatives_path, index=False
+    )
+    clustered_corrected_seat_area_segment_representatives.to_csv(
+        clustered_corrected_seat_area_segment_representatives_path, index=False
+    )
+    corrected_table_points_from_segment_representatives.to_csv(
+        corrected_table_points_from_segment_representatives_path, index=False
+    )
+    alpha_shape_area_comparison.to_csv(alpha_shape_area_comparison_path, index=False)
+    for alpha, alpha_shapes in corrected_table_region_alpha_shapes_by_alpha.items():
+        alpha_shapes.to_csv(corrected_table_region_alpha_shape_paths[alpha], index=False)
+    _write_correction_requirements(correction_requirements_path, correction_config)
+    _write_correction_result(
+        correction_result_path,
+        correction_config,
+        trajectory_correction_summary,
+        alpha_shape_area_comparison,
+    )
     plot_table_regions(
         trajectories,
         segments,
@@ -217,6 +294,26 @@ def main() -> None:
         table_config.get("table_overlays", {}),
         segment_representative_figure_path,
         "Data001/Data002 segment classification with representatives",
+        dpi=int(config["visualization"]["figure_dpi"]),
+        equal_axis=bool(config["visualization"]["equal_axis"]),
+        show_grid=bool(config["visualization"]["show_grid"]),
+    )
+    plot_table_trajectory_overview(
+        trajectories,
+        table_points_from_segment_representatives,
+        table_config.get("table_overlays", {}),
+        uncorrected_trajectory_overview_path,
+        "Uncorrected PDR trajectories",
+        dpi=int(config["visualization"]["figure_dpi"]),
+        equal_axis=bool(config["visualization"]["equal_axis"]),
+        show_grid=bool(config["visualization"]["show_grid"]),
+    )
+    plot_table_trajectory_overview(
+        corrected_trajectories,
+        table_points_from_segment_representatives,
+        table_config.get("table_overlays", {}),
+        corrected_trajectory_overview_path,
+        "Corrected PDR trajectories",
         dpi=int(config["visualization"]["figure_dpi"]),
         equal_axis=bool(config["visualization"]["equal_axis"]),
         show_grid=bool(config["visualization"]["show_grid"]),
@@ -245,6 +342,17 @@ def main() -> None:
             equal_axis=bool(config["visualization"]["equal_axis"]),
             show_grid=bool(config["visualization"]["show_grid"]),
         )
+        plot_table_region_alpha_shapes(
+            clustered_corrected_seat_area_segment_representatives,
+            alpha=alpha,
+            min_points=4,
+            table_overlays=table_config.get("table_overlays", {}),
+            output_path=corrected_alpha_shape_figure_paths[alpha],
+            title=f"Corrected alpha-shape regions from segment-center clusters alpha={alpha}",
+            dpi=int(config["visualization"]["figure_dpi"]),
+            equal_axis=bool(config["visualization"]["equal_axis"]),
+            show_grid=bool(config["visualization"]["show_grid"]),
+        )
     print(f"Target trajectories: {len(trajectories)}")
     print(f"Segments: {segments_path}")
     print(f"Segment summary: {segment_summary_path}")
@@ -262,11 +370,19 @@ def main() -> None:
     print(f"Ellipse regions from segment centers: {table_region_ellipses_path}")
     for alpha in alpha_shape_values:
         print(f"Alpha-shape regions from segment centers alpha={alpha}: {table_region_alpha_shape_paths[alpha]}")
+        print(f"Corrected alpha-shape regions from segment centers alpha={alpha}: {corrected_table_region_alpha_shape_paths[alpha]}")
+    print(f"Trajectory correction requirements: {correction_requirements_path}")
+    print(f"Trajectory correction result: {correction_result_path}")
+    print(f"Trajectory correction summary: {trajectory_correction_summary_path}")
+    print(f"Alpha-shape area comparison: {alpha_shape_area_comparison_path}")
     print(f"Representative point figure: {figure_path}")
     print(f"Segment representative figure: {segment_representative_figure_path}")
+    print(f"Uncorrected trajectory overview figure: {uncorrected_trajectory_overview_path}")
+    print(f"Corrected trajectory overview figure: {corrected_trajectory_overview_path}")
     print(f"Ellipse region figure: {ellipse_figure_path}")
     for alpha in alpha_shape_values:
         print(f"Alpha-shape region figure alpha={alpha}: {alpha_shape_figure_paths[alpha]}")
+        print(f"Corrected alpha-shape region figure alpha={alpha}: {corrected_alpha_shape_figure_paths[alpha]}")
 
 
 def _summarize_segments_by_trial(segments: pd.DataFrame) -> pd.DataFrame:
@@ -440,6 +556,184 @@ def _alpha_shape_source_segments(
     return merged[columns + remaining].sort_values(
         ["destination_label", "trial_id", "segment_id"]
     )
+
+
+def _alpha_shape_area_comparison(
+    uncorrected_by_alpha: dict[float, pd.DataFrame],
+    corrected_by_alpha: dict[float, pd.DataFrame],
+) -> pd.DataFrame:
+    rows = []
+    for alpha, uncorrected in uncorrected_by_alpha.items():
+        corrected = corrected_by_alpha.get(alpha, pd.DataFrame())
+        if uncorrected.empty or corrected.empty:
+            continue
+        merged = uncorrected[
+            ["destination_label", "alpha", "point_count", "alpha_area_m2"]
+        ].merge(
+            corrected[["destination_label", "point_count", "alpha_area_m2"]],
+            on="destination_label",
+            how="outer",
+            suffixes=("_uncorrected", "_corrected"),
+        )
+        for _, row in merged.iterrows():
+            before = float(row["alpha_area_m2_uncorrected"])
+            after = float(row["alpha_area_m2_corrected"])
+            rows.append(
+                {
+                    "destination_label": row["destination_label"],
+                    "alpha": float(alpha),
+                    "point_count_uncorrected": int(row["point_count_uncorrected"]),
+                    "point_count_corrected": int(row["point_count_corrected"]),
+                    "alpha_area_m2_uncorrected": before,
+                    "alpha_area_m2_corrected": after,
+                    "area_delta_m2": after - before,
+                    "area_ratio_corrected_to_uncorrected": after / before if before else 0.0,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _write_correction_requirements(output_path: Path, correction_config: dict) -> None:
+    target_radius = float(correction_config.get("target_radius_m", 0.45))
+    progress_power = float(correction_config.get("progress_power", 1.0))
+    text = f"""# Trajectory Correction Requirements
+
+## Purpose
+
+PDR trajectories accumulate position error as walking progresses. In the table-region estimation task, this appears as large dispersion near trajectory endpoints and can inflate the alpha-shape area of the estimated table region.
+
+The correction step aims to reduce endpoint dispersion before estimating the final table region, while avoiding the unrealistic assumption that every trajectory ends at exactly the same point.
+
+## Processing Flow
+
+1. Visualize trajectories with PDR.
+2. Split each trajectory into segments.
+3. Extract seat-area segments.
+4. Estimate table representative points with DBSCAN.
+5. Correct trajectories toward the estimated table representative points.
+6. Recompute seat-area segment centers on corrected trajectories.
+7. Estimate corrected table regions with alpha-shape.
+
+## Correction Method
+
+For each trajectory, the estimated table representative point for its destination label is used as the correction anchor.
+
+The endpoint is not moved directly to the anchor. Instead, it is moved only as much as needed to place it within a radius around the anchor.
+
+Current parameters:
+
+- `target_radius_m`: {target_radius:.2f} m
+- `progress_power`: {progress_power:.2f}
+
+For an endpoint `p_end` and table anchor `c`, the corrected endpoint is:
+
+- unchanged if `distance(p_end, c) <= target_radius_m`
+- otherwise projected to the circle centered at `c` with radius `target_radius_m`
+
+The endpoint correction vector is then distributed over the trajectory:
+
+```text
+corrected_xy(i) = original_xy(i) + progress(i)^progress_power * endpoint_correction
+```
+
+where `progress(i)` goes from 0 at the first step to 1 at the endpoint.
+
+## Design Rationale
+
+- The start of the trajectory is kept stable.
+- The endpoint dispersion is reduced, but not collapsed to a single point.
+- The correction uses only estimated table points from the trajectory data, not prior map/table coordinates.
+- Segmentation labels are kept from the pre-correction analysis, so the correction only changes the geometry used by region estimation.
+
+## Outputs
+
+- `trajectories_uncorrected_overview.png`
+- `trajectories_corrected_overview.png`
+- `trajectory_correction_summary.csv`
+- `corrected_seat_area_segment_representatives.csv`
+- `clustered_corrected_seat_area_segment_representatives.csv`
+- `corrected_table_region_alpha_shapes_from_segment_centers.csv`
+- `corrected_table_region_alpha_shapes_from_segment_centers_alpha1p5.csv`
+- `table_region_alpha_shape_area_comparison.csv`
+"""
+    output_path.write_text(text, encoding="utf-8")
+
+
+def _write_correction_result(
+    output_path: Path,
+    correction_config: dict,
+    correction_summary: pd.DataFrame,
+    area_comparison: pd.DataFrame,
+) -> None:
+    target_radius = float(correction_config.get("target_radius_m", 0.45))
+    progress_power = float(correction_config.get("progress_power", 1.0))
+    if correction_summary.empty:
+        endpoint_summary = "No trajectories were corrected."
+    else:
+        endpoint_summary_df = (
+            correction_summary.groupby("destination_label", sort=True)
+            .agg(
+                trajectory_count=("trial_id", "count"),
+                mean_before_m=("endpoint_distance_to_target_before_m", "mean"),
+                mean_after_m=("endpoint_distance_to_target_after_m", "mean"),
+                mean_correction_m=("endpoint_correction_distance_m", "mean"),
+                max_correction_m=("endpoint_correction_distance_m", "max"),
+            )
+            .reset_index()
+        )
+        endpoint_summary = _markdown_table(endpoint_summary_df)
+
+    if area_comparison.empty:
+        area_summary = "No alpha-shape area comparison was produced."
+    else:
+        area_summary = _markdown_table(area_comparison)
+
+    text = f"""# Trajectory Correction Implementation Result
+
+## Implemented Method
+
+The implemented correction uses estimated table representative points as anchors. Each trajectory endpoint is projected into a radius around its table anchor, and the resulting correction vector is applied gradually along the trajectory.
+
+Parameters:
+
+- `target_radius_m`: {target_radius:.2f} m
+- `progress_power`: {progress_power:.2f}
+
+## Endpoint Correction Summary
+
+{endpoint_summary}
+
+## Alpha-Shape Area Comparison
+
+{area_summary}
+
+## Interpretation
+
+The correction is intended to reduce PDR endpoint drift while retaining plausible endpoint variation around each table. If corrected alpha-shape areas become smaller than the uncorrected areas, that indicates the endpoint-dispersion component of the area error has been reduced.
+
+The correction should be treated as an experimental stage placed after table representative estimation and before final area estimation.
+"""
+    output_path.write_text(text, encoding="utf-8")
+
+
+def _markdown_table(df: pd.DataFrame) -> str:
+    if df.empty:
+        return ""
+    columns = list(df.columns)
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for _, row in df.iterrows():
+        values = []
+        for column in columns:
+            value = row[column]
+            if isinstance(value, float):
+                values.append(f"{value:.4f}")
+            else:
+                values.append(str(value))
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines)
 
 
 def _summarize_speed_features(speed_features: pd.DataFrame) -> pd.DataFrame:
