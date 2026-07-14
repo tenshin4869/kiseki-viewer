@@ -51,8 +51,8 @@ def add_step_metrics(trajectory_df: pd.DataFrame, config: dict[str, Any]) -> pd.
     window = int(config.get("speed_window_steps", 4))
     previous_speed = _previous_rolling_mean(speed, window)
     future_speed = _future_rolling_mean(speed, window)
-    speed_drop_ratio = np.maximum((previous_speed - speed) / np.maximum(previous_speed, 1e-9), 0.0)
     signed_speed_change_ratio = (future_speed - previous_speed) / np.maximum(previous_speed, 1e-9)
+    speed_drop_ratio = np.maximum(-signed_speed_change_ratio, 0.0)
     speed_change_ratio = np.abs(signed_speed_change_ratio)
 
     progress = np.linspace(1.0 / len(df), 1.0, len(df))

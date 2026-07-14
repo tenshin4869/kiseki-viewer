@@ -104,7 +104,7 @@ def _read_phyphox_csv(path: str | Path, column_map: dict[str, str], sensor_name:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"{sensor_name} CSV not found: {path}")
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, sep=None, engine="python")
     missing = [col for col in column_map if col not in df.columns]
     if missing:
         expected = ", ".join(column_map)
