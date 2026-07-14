@@ -51,8 +51,8 @@ def add_step_metrics(trajectory_df: pd.DataFrame, config: dict[str, Any]) -> pd.
     window = int(config.get("speed_window_steps", 4))
     previous_speed = _previous_rolling_mean(speed, window)
     future_speed = _future_rolling_mean(speed, window)
-    speed_drop_ratio = np.maximum((previous_speed - speed) / np.maximum(previous_speed, 1e-9), 0.0)
     signed_speed_change_ratio = (future_speed - previous_speed) / np.maximum(previous_speed, 1e-9)
+    speed_drop_ratio = np.maximum(-signed_speed_change_ratio, 0.0)
     speed_change_ratio = np.abs(signed_speed_change_ratio)
 
     progress = np.linspace(1.0 / len(df), 1.0, len(df))
@@ -415,6 +415,92 @@ def correct_trajectories_to_table_targets(
     return corrected_trajectories, pd.DataFrame(summary_rows)
 
 
+def correct_trajectories_to_corridor_lines(
+    trajectories: list[tuple[str, str, pd.DataFrame]],
+    segments: pd.DataFrame,
+    config: dict[str, Any],
+) -> tuple[list[tuple[str, str, pd.DataFrame]], pd.DataFrame, pd.DataFrame]:
+    corridor_gain = float(config.get("corridor_gain", 0.0))
+    min_progress = float(config.get("corridor_min_progress", 0.0))
+    max_progress = float(config.get("corridor_max_progress", 0.85))
+    min_points = int(config.get("corridor_min_points", 4))
+    if corridor_gain <= 0.0 or segments.empty:
+        return (
+            [(trial_id, label, trajectory.copy()) for trial_id, label, trajectory in trajectories],
+            pd.DataFrame(),
+            pd.DataFrame(),
+        )
+
+    corridor_points = _corridor_points_from_segments(
+        trajectories,
+        segments,
+        min_progress,
+        max_progress,
+    )
+    corridor_lines = _corridor_pca_lines(corridor_points, min_points)
+    lines_by_label = {
+        str(row["destination_label"]): row
+        for _, row in corridor_lines.iterrows()
+    }
+
+    corrected_trajectories: list[tuple[str, str, pd.DataFrame]] = []
+    summary_rows: list[dict[str, Any]] = []
+    corridor_segments = segments[segments["classification"] == "corridor"]
+    for trial_id, label, trajectory in trajectories:
+        corrected = trajectory.copy()
+        corrected["corridor_correction_dx_m"] = 0.0
+        corrected["corridor_correction_dy_m"] = 0.0
+        line = lines_by_label.get(label)
+        trial_segments = corridor_segments[
+            (corridor_segments["trial_id"] == trial_id)
+            & (corridor_segments["progress_end"] >= min_progress)
+            & (corridor_segments["progress_end"] <= max_progress)
+        ]
+        corrected_count = 0
+        total_shift = 0.0
+        max_shift = 0.0
+        if line is not None and not trial_segments.empty and not corrected.empty:
+            point_on_line = np.array([float(line["line_point_x"]), float(line["line_point_y"])])
+            direction = np.array([float(line["direction_x"]), float(line["direction_y"])])
+            corrected_indices: set[int] = set()
+            for _, segment in trial_segments.iterrows():
+                start = int(segment["start_row"])
+                end = int(segment["end_row"])
+                for row_index in range(max(start, 0), min(end, len(corrected))):
+                    progress = row_index / max(len(corrected) - 1, 1)
+                    if min_progress <= progress <= max_progress:
+                        corrected_indices.add(row_index)
+            if corrected_indices:
+                ordered_indices = sorted(corrected_indices)
+                coords = corrected.loc[ordered_indices, ["x", "y"]].to_numpy(dtype=float)
+                projected = _project_points_to_line(coords, point_on_line, direction)
+                shifts = corridor_gain * (projected - coords)
+                corrected.loc[ordered_indices, "x"] = coords[:, 0] + shifts[:, 0]
+                corrected.loc[ordered_indices, "y"] = coords[:, 1] + shifts[:, 1]
+                corrected.loc[ordered_indices, "corridor_correction_dx_m"] = shifts[:, 0]
+                corrected.loc[ordered_indices, "corridor_correction_dy_m"] = shifts[:, 1]
+                distances = np.linalg.norm(shifts, axis=1)
+                corrected_count = len(ordered_indices)
+                total_shift = float(np.sum(distances))
+                max_shift = float(np.max(distances)) if len(distances) else 0.0
+
+        corrected_trajectories.append((trial_id, label, corrected))
+        summary_rows.append(
+            {
+                "trial_id": trial_id,
+                "destination_label": label,
+                "corridor_gain": corridor_gain,
+                "corridor_min_progress": min_progress,
+                "corridor_max_progress": max_progress,
+                "corrected_point_count": corrected_count,
+                "mean_corridor_shift_m": total_shift / corrected_count if corrected_count else 0.0,
+                "max_corridor_shift_m": max_shift,
+            }
+        )
+
+    return corrected_trajectories, pd.DataFrame(summary_rows), corridor_lines
+
+
 def recompute_segment_centers_from_trajectories(
     segments: pd.DataFrame,
     trajectories: list[tuple[str, str, pd.DataFrame]],
@@ -672,6 +758,104 @@ def _table_point_targets(table_points: pd.DataFrame) -> dict[str, np.ndarray]:
             dtype=float,
         )
     return targets
+
+
+def _corridor_points_from_segments(
+    trajectories: list[tuple[str, str, pd.DataFrame]],
+    segments: pd.DataFrame,
+    min_progress: float,
+    max_progress: float,
+) -> pd.DataFrame:
+    trajectory_by_trial = {trial_id: trajectory for trial_id, _, trajectory in trajectories}
+    rows: list[dict[str, Any]] = []
+    corridor_segments = segments[
+        (segments["classification"] == "corridor")
+        & (segments["progress_end"] >= min_progress)
+        & (segments["progress_end"] <= max_progress)
+    ]
+    for _, segment in corridor_segments.iterrows():
+        trial_id = str(segment["trial_id"])
+        trajectory = trajectory_by_trial.get(trial_id)
+        if trajectory is None or trajectory.empty:
+            continue
+        start = int(segment["start_row"])
+        end = int(segment["end_row"])
+        selected = trajectory.iloc[max(start, 0):min(end, len(trajectory))]
+        for row_index, point in selected.iterrows():
+            progress = row_index / max(len(trajectory) - 1, 1)
+            if progress < min_progress or progress > max_progress:
+                continue
+            rows.append(
+                {
+                    "trial_id": trial_id,
+                    "destination_label": str(segment["destination_label"]),
+                    "segment_id": int(segment["segment_id"]),
+                    "row_index": int(row_index),
+                    "x": float(point["x"]),
+                    "y": float(point["y"]),
+                }
+            )
+    return pd.DataFrame(
+        rows,
+        columns=["trial_id", "destination_label", "segment_id", "row_index", "x", "y"],
+    )
+
+
+def _corridor_pca_lines(corridor_points: pd.DataFrame, min_points: int) -> pd.DataFrame:
+    columns = [
+        "destination_label",
+        "point_count",
+        "line_point_x",
+        "line_point_y",
+        "direction_x",
+        "direction_y",
+        "explained_variance_ratio",
+    ]
+    if corridor_points.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, Any]] = []
+    for label, group in corridor_points.groupby("destination_label", sort=True):
+        coords = group[["x", "y"]].to_numpy(dtype=float)
+        if len(coords) < min_points:
+            continue
+        center = coords.mean(axis=0)
+        centered = coords - center
+        covariance = np.cov(centered, rowvar=False)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        order = eigenvalues.argsort()[::-1]
+        eigenvalues = np.maximum(eigenvalues[order], 0.0)
+        direction = eigenvectors[:, order[0]]
+        if direction[1] < 0:
+            direction = -direction
+        total_variance = float(np.sum(eigenvalues))
+        explained = float(eigenvalues[0] / total_variance) if total_variance > 0 else 0.0
+        rows.append(
+            {
+                "destination_label": str(label),
+                "point_count": int(len(coords)),
+                "line_point_x": float(center[0]),
+                "line_point_y": float(center[1]),
+                "direction_x": float(direction[0]),
+                "direction_y": float(direction[1]),
+                "explained_variance_ratio": explained,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _project_points_to_line(
+    points: np.ndarray,
+    line_point: np.ndarray,
+    direction: np.ndarray,
+) -> np.ndarray:
+    norm = float(np.linalg.norm(direction))
+    if norm <= 1e-9:
+        return points.copy()
+    unit = direction / norm
+    offsets = points - line_point
+    distances_along_line = offsets @ unit
+    return line_point + np.outer(distances_along_line, unit)
 
 
 def _trajectory_progress(length: int, power: float) -> np.ndarray:

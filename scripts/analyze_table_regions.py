@@ -21,6 +21,7 @@ from pdr_visualizer.table_region import (
     add_step_metrics,
     classify_table_area_segments,
     cluster_representative_points,
+    correct_trajectories_to_corridor_lines,
     correct_trajectories_to_table_targets,
     destination_label_from_trial_id,
     is_target_trial,
@@ -50,6 +51,35 @@ def main() -> None:
         type=float,
         default=None,
         help="Override the speed drop ratio used for seat-area classification.",
+    )
+    parser.add_argument(
+        "--alpha-values",
+        default="0.9,1.5",
+        help="Comma-separated alpha values for alpha-shape area comparison.",
+    )
+    parser.add_argument(
+        "--correction-progress-power",
+        type=float,
+        default=None,
+        help="Override trajectory correction progress_power.",
+    )
+    parser.add_argument(
+        "--corridor-gain",
+        type=float,
+        default=0.0,
+        help="Move corridor points toward PCA corridor lines by this ratio before endpoint correction.",
+    )
+    parser.add_argument(
+        "--corridor-max-progress",
+        type=float,
+        default=0.85,
+        help="Use only corridor segments whose progress_end is at or below this value.",
+    )
+    parser.add_argument(
+        "--corridor-min-progress",
+        type=float,
+        default=0.0,
+        help="Do not apply corridor correction before this trajectory progress ratio.",
     )
     args = parser.parse_args()
 
@@ -140,7 +170,7 @@ def main() -> None:
         clustered_seat_area_segment_representatives,
         n_std=2.0,
     )
-    alpha_shape_values = [0.9, 1.5]
+    alpha_shape_values = _parse_alpha_values(args.alpha_values)
     table_region_alpha_shapes_by_alpha = {
         alpha: summarize_cluster_alpha_shapes(
             clustered_seat_area_segment_representatives,
@@ -150,8 +180,23 @@ def main() -> None:
         for alpha in alpha_shape_values
     }
     correction_config = dict(table_config.get("trajectory_correction", {}))
+    if args.correction_progress_power is not None:
+        correction_config["progress_power"] = args.correction_progress_power
+    corridor_config = {
+        "corridor_gain": args.corridor_gain,
+        "corridor_min_progress": args.corridor_min_progress,
+        "corridor_max_progress": args.corridor_max_progress,
+        "corridor_min_points": 4,
+    }
+    corridor_corrected_trajectories, corridor_correction_summary, corridor_lines = (
+        correct_trajectories_to_corridor_lines(
+            trajectories,
+            segments,
+            corridor_config,
+        )
+    )
     corrected_trajectories, trajectory_correction_summary = correct_trajectories_to_table_targets(
-        trajectories,
+        corridor_corrected_trajectories,
         table_points_from_segment_representatives,
         correction_config,
     )
@@ -180,6 +225,12 @@ def main() -> None:
         table_region_alpha_shapes_by_alpha,
         corrected_table_region_alpha_shapes_by_alpha,
     )
+    correction_strategy_area_comparison = _alpha_shape_strategy_comparison(
+        {
+            "uncorrected": table_region_alpha_shapes_by_alpha,
+            "corrected_reuse_segments": corrected_table_region_alpha_shapes_by_alpha,
+        }
+    )
 
     segments_path = table_output_dir / "segments.csv"
     segment_summary_path = table_output_dir / "segment_summary.csv"
@@ -199,22 +250,27 @@ def main() -> None:
     )
     alpha_shape_source_segments_path = table_output_dir / "table_region_alpha_shape_source_segments.csv"
     table_region_ellipses_path = table_output_dir / "table_region_ellipses_from_segment_centers.csv"
-    table_region_alpha_shapes_path = table_output_dir / "table_region_alpha_shapes_from_segment_centers.csv"
-    table_region_alpha_shape_paths = {
-        0.9: table_region_alpha_shapes_path,
-        1.5: table_output_dir / "table_region_alpha_shapes_from_segment_centers_alpha1p5.csv",
-    }
+    table_region_alpha_shape_paths = _alpha_output_paths(
+        table_output_dir,
+        "table_region_alpha_shapes_from_segment_centers",
+        alpha_shape_values,
+        default_alpha=0.9,
+    )
     figure_path = table_output_dir / "table_region_cluster_points.png"
     segment_representative_figure_path = table_output_dir / "table_region_segment_representatives.png"
     ellipse_figure_path = table_output_dir / "table_region_ellipses_from_segment_centers.png"
-    alpha_shape_figure_path = table_output_dir / "table_region_alpha_shapes_from_segment_centers.png"
-    alpha_shape_figure_paths = {
-        0.9: alpha_shape_figure_path,
-        1.5: table_output_dir / "table_region_alpha_shapes_from_segment_centers_alpha1p5.png",
-    }
+    alpha_shape_figure_paths = _alpha_output_paths(
+        table_output_dir,
+        "table_region_alpha_shapes_from_segment_centers",
+        alpha_shape_values,
+        default_alpha=0.9,
+        extension=".png",
+    )
     correction_requirements_path = table_output_dir / "trajectory_correction_requirements.md"
     correction_result_path = table_output_dir / "trajectory_correction_implementation_result.md"
     trajectory_correction_summary_path = table_output_dir / "trajectory_correction_summary.csv"
+    corridor_correction_summary_path = table_output_dir / "corridor_correction_summary.csv"
+    corridor_lines_path = table_output_dir / "corridor_pca_lines.csv"
     corrected_seat_area_segment_representatives_path = (
         table_output_dir / "corrected_seat_area_segment_representatives.csv"
     )
@@ -225,16 +281,24 @@ def main() -> None:
         table_output_dir / "corrected_table_region_points_from_segment_representatives.csv"
     )
     alpha_shape_area_comparison_path = table_output_dir / "table_region_alpha_shape_area_comparison.csv"
-    corrected_table_region_alpha_shape_paths = {
-        0.9: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers.csv",
-        1.5: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers_alpha1p5.csv",
-    }
+    correction_strategy_area_comparison_path = (
+        table_output_dir / "table_region_correction_strategy_alpha_shape_comparison.csv"
+    )
+    corrected_table_region_alpha_shape_paths = _alpha_output_paths(
+        table_output_dir,
+        "corrected_table_region_alpha_shapes_from_segment_centers",
+        alpha_shape_values,
+        default_alpha=0.9,
+    )
     uncorrected_trajectory_overview_path = table_output_dir / "trajectories_uncorrected_overview.png"
     corrected_trajectory_overview_path = table_output_dir / "trajectories_corrected_overview.png"
-    corrected_alpha_shape_figure_paths = {
-        0.9: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers.png",
-        1.5: table_output_dir / "corrected_table_region_alpha_shapes_from_segment_centers_alpha1p5.png",
-    }
+    corrected_alpha_shape_figure_paths = _alpha_output_paths(
+        table_output_dir,
+        "corrected_table_region_alpha_shapes_from_segment_centers",
+        alpha_shape_values,
+        default_alpha=0.9,
+        extension=".png",
+    )
     segments.to_csv(segments_path, index=False)
     segment_summary.to_csv(segment_summary_path, index=False)
     speed_features.to_csv(speed_features_path, index=False)
@@ -256,6 +320,8 @@ def main() -> None:
     for alpha, alpha_shapes in table_region_alpha_shapes_by_alpha.items():
         alpha_shapes.to_csv(table_region_alpha_shape_paths[alpha], index=False)
     trajectory_correction_summary.to_csv(trajectory_correction_summary_path, index=False)
+    corridor_correction_summary.to_csv(corridor_correction_summary_path, index=False)
+    corridor_lines.to_csv(corridor_lines_path, index=False)
     corrected_seat_area_segment_representatives.to_csv(
         corrected_seat_area_segment_representatives_path, index=False
     )
@@ -266,6 +332,7 @@ def main() -> None:
         corrected_table_points_from_segment_representatives_path, index=False
     )
     alpha_shape_area_comparison.to_csv(alpha_shape_area_comparison_path, index=False)
+    correction_strategy_area_comparison.to_csv(correction_strategy_area_comparison_path, index=False)
     for alpha, alpha_shapes in corrected_table_region_alpha_shapes_by_alpha.items():
         alpha_shapes.to_csv(corrected_table_region_alpha_shape_paths[alpha], index=False)
     _write_correction_requirements(correction_requirements_path, correction_config)
@@ -374,7 +441,10 @@ def main() -> None:
     print(f"Trajectory correction requirements: {correction_requirements_path}")
     print(f"Trajectory correction result: {correction_result_path}")
     print(f"Trajectory correction summary: {trajectory_correction_summary_path}")
+    print(f"Corridor correction summary: {corridor_correction_summary_path}")
+    print(f"Corridor PCA lines: {corridor_lines_path}")
     print(f"Alpha-shape area comparison: {alpha_shape_area_comparison_path}")
+    print(f"Correction strategy alpha-shape comparison: {correction_strategy_area_comparison_path}")
     print(f"Representative point figure: {figure_path}")
     print(f"Segment representative figure: {segment_representative_figure_path}")
     print(f"Uncorrected trajectory overview figure: {uncorrected_trajectory_overview_path}")
@@ -383,6 +453,44 @@ def main() -> None:
     for alpha in alpha_shape_values:
         print(f"Alpha-shape region figure alpha={alpha}: {alpha_shape_figure_paths[alpha]}")
         print(f"Corrected alpha-shape region figure alpha={alpha}: {corrected_alpha_shape_figure_paths[alpha]}")
+
+
+def _parse_alpha_values(raw_values: str) -> list[float]:
+    values: list[float] = []
+    for raw_value in raw_values.split(","):
+        stripped = raw_value.strip()
+        if not stripped:
+            continue
+        value = float(stripped)
+        if value <= 0:
+            raise ValueError("Alpha values must be positive.")
+        values.append(value)
+    if not values:
+        raise ValueError("At least one alpha value is required.")
+    return sorted(dict.fromkeys(values))
+
+
+def _alpha_output_paths(
+    output_dir: Path,
+    base_name: str,
+    alpha_values: list[float],
+    *,
+    default_alpha: float | None = None,
+    extension: str = ".csv",
+) -> dict[float, Path]:
+    paths = {}
+    for alpha in alpha_values:
+        if default_alpha is not None and abs(alpha - default_alpha) < 1e-9:
+            filename = f"{base_name}{extension}"
+        else:
+            filename = f"{base_name}_{_alpha_filename_suffix(alpha)}{extension}"
+        paths[alpha] = output_dir / filename
+    return paths
+
+
+def _alpha_filename_suffix(alpha: float) -> str:
+    text = f"{alpha:g}".replace("-", "m").replace(".", "p")
+    return f"alpha{text}"
 
 
 def _summarize_segments_by_trial(segments: pd.DataFrame) -> pd.DataFrame:
@@ -591,6 +699,45 @@ def _alpha_shape_area_comparison(
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _alpha_shape_strategy_comparison(
+    strategy_shapes: dict[str, dict[float, pd.DataFrame]],
+) -> pd.DataFrame:
+    rows = []
+    for strategy, shapes_by_alpha in strategy_shapes.items():
+        for alpha, shapes in shapes_by_alpha.items():
+            if shapes.empty:
+                continue
+            for _, row in shapes.iterrows():
+                rows.append(
+                    {
+                        "strategy": strategy,
+                        "destination_label": str(row["destination_label"]),
+                        "alpha": float(alpha),
+                        "point_count": int(row["point_count"]),
+                        "alpha_area_m2": float(row["alpha_area_m2"]),
+                    }
+                )
+    comparison = pd.DataFrame(rows)
+    if comparison.empty:
+        return comparison
+
+    baseline = comparison[comparison["strategy"] == "corrected_reuse_segments"][
+        ["destination_label", "alpha", "alpha_area_m2"]
+    ].rename(columns={"alpha_area_m2": "reuse_segments_area_m2"})
+    comparison = comparison.merge(
+        baseline,
+        on=["destination_label", "alpha"],
+        how="left",
+    )
+    comparison["area_delta_vs_reuse_segments_m2"] = (
+        comparison["alpha_area_m2"] - comparison["reuse_segments_area_m2"]
+    )
+    comparison["area_ratio_vs_reuse_segments"] = comparison["alpha_area_m2"] / comparison[
+        "reuse_segments_area_m2"
+    ]
+    return comparison.sort_values(["alpha", "destination_label", "strategy"])
 
 
 def _write_correction_requirements(output_path: Path, correction_config: dict) -> None:

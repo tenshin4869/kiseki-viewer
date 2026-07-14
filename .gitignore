@@ -10,3 +10,8 @@ venv/
 # Generated PDR results.
 output/
 output_test/
+
+# Local extracted dataset artifacts.
+data/__MACOSX/
+data/data/
+data/**/*.zip
